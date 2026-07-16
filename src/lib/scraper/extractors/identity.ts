@@ -16,17 +16,10 @@ function extractName(): string | null {
 
     const ogTitle = safeQuery<HTMLMetaElement>(document, 'meta[property="og:title"]')
     if (ogTitle?.content) {
-      const parts = ogTitle.content.split('|')
-      return parts[0]?.trim() ?? null
+      return ogTitle.content.split('|')[0]?.trim() ?? null
     }
 
-    const titleText = document.title
-    if (titleText) {
-      const parts = titleText.split('|')
-      return parts[0]?.trim() ?? null
-    }
-
-    return null
+    return document.title.split('|')[0]?.trim() ?? null
   } catch {
     return null
   }
@@ -34,27 +27,31 @@ function extractName(): string | null {
 
 function extractHeadline(): string | null {
   try {
-    // LinkedIn renders headline in a div below the h1, typically with a class
-    // we target it by looking for the first substantial text block after h1
     const h1 = document.querySelector('h1')
     if (!h1) return null
 
-    // Walk siblings of h1's parent to find a headline-like element
-    const parent = h1.closest('div, section')
-    if (!parent) return null
+    // Walk up from h1 to find its section container, then look for headline
+    let container: Element | null = h1.parentElement
+    for (let i = 0; i < 6; i++) {
+      if (!container) break
 
-    // Look for an element with aria-label containing 'headline' or specific data attributes
-    const headlineEl =
-      parent.querySelector('[data-field="headline"]') ??
-      parent.querySelector('[aria-label*="headline" i]')
+      // LinkedIn renders headline in .text-body-medium right after the name block
+      const candidate = container.querySelector('.text-body-medium')
+      if (candidate) {
+        const text = getTextContent(candidate)
+        if (text && text.length > 3) return text
+      }
 
-    if (headlineEl) return getTextContent(headlineEl)
+      container = container.parentElement
+    }
 
-    // Fallback: find the first div/span sibling after h1 with substantial text
+    // Fallback: first div/span sibling after h1 with substantial text (not a button, not a degree badge)
     let sibling = h1.nextElementSibling
     while (sibling) {
-      const text = getTextContent(sibling)
-      if (text && text.length > 5 && !text.match(/^\d/)) return text
+      if (sibling.tagName !== 'BUTTON') {
+        const text = getTextContent(sibling)
+        if (text && text.length > 10 && !/^\d/.test(text)) return text
+      }
       sibling = sibling.nextElementSibling
     }
 
@@ -66,35 +63,39 @@ function extractHeadline(): string | null {
 
 function extractRoleAndCompany(): { role: string | null; company: string | null } {
   try {
-    // Try to find the experience section
-    const sections = document.querySelectorAll('section')
-    for (const section of sections) {
-      const heading = section.querySelector('h2, h3')
-      const headingText = getTextContent(heading)
-      if (!headingText?.toLowerCase().includes('experience')) continue
+    // Try the Experience section — LinkedIn uses id="experience" on a div inside a section
+    const expAnchor =
+      document.querySelector('#experience') ??
+      document.querySelector('[id*="experience" i]')
 
-      // First list item in experience = current role
-      const firstItem = section.querySelector('li')
-      if (!firstItem) continue
+    const expSection = expAnchor?.closest('section') ?? null
 
-      const roleEl =
-        firstItem.querySelector('[data-field="title"]') ??
-        firstItem.querySelector('span[aria-hidden="true"]') ??
-        firstItem.querySelector('h3') ??
-        firstItem.querySelector('h4')
-
-      const companyEl =
-        firstItem.querySelector('[data-field="subtitle"]') ??
-        firstItem.querySelectorAll('span[aria-hidden="true"]')[1] ??
-        null
-
-      return {
-        role: getTextContent(roleEl ?? null),
-        company: getTextContent(companyEl ?? null),
+    if (expSection) {
+      const items = expSection.querySelectorAll('li')
+      const first = items[0]
+      if (first) {
+        // LinkedIn renders role title in a span[aria-hidden="true"] (first one = title)
+        const ariaHiddenSpans = first.querySelectorAll('span[aria-hidden="true"]')
+        const role = getTextContent(ariaHiddenSpans[0] ?? null)
+        const company = getTextContent(ariaHiddenSpans[1] ?? null)
+        if (role) return { role, company: company ?? null }
       }
     }
 
-    // Fallback: parse headline as "Role at Company"
+    // Fallback: look for any section whose h2 text includes "Experience"
+    const sections = document.querySelectorAll('section')
+    for (const section of sections) {
+      const h2 = section.querySelector('h2')
+      if (!getTextContent(h2)?.toLowerCase().includes('experience')) continue
+      const first = section.querySelector('li')
+      if (!first) continue
+      const spans = first.querySelectorAll('span[aria-hidden="true"]')
+      const role = getTextContent(spans[0] ?? null)
+      const company = getTextContent(spans[1] ?? null)
+      if (role) return { role, company: company ?? null }
+    }
+
+    // Last resort: parse headline "Title at Company"
     const headline = extractHeadline()
     if (headline) {
       const match = /^(.+?)\s+(?:at|@)\s+(.+)$/i.exec(headline)
@@ -109,25 +110,25 @@ function extractRoleAndCompany(): { role: string | null; company: string | null 
 
 function extractLocation(): string | null {
   try {
-    // LinkedIn shows location near the profile header as a button or span
-    const locationEl =
-      document.querySelector('[data-field="location"]') ??
-      document.querySelector('button[aria-label*="location" i]') ??
-      document.querySelector('span[aria-label*="location" i]')
+    const h1 = document.querySelector('h1')
+    if (!h1) return null
 
-    if (locationEl) return getTextContent(locationEl)
+    // Walk up to find the profile top card container
+    let container: Element | null = h1.parentElement
+    for (let i = 0; i < 6; i++) {
+      if (!container) break
 
-    // Fallback: look for city-like text near profile header
-    const profileSection = document.querySelector('section.pv-top-card, .ph5.pb5')
-    if (profileSection) {
-      const spans = profileSection.querySelectorAll('span')
-      for (const span of spans) {
-        const text = getTextContent(span)
-        // Location usually has a comma (City, Country) and no special chars
-        if (text && /^[A-Za-z\s]+,\s*[A-Za-z\s]+$/.test(text) && text.length < 60) {
-          return text
-        }
+      // LinkedIn renders location in a span.text-body-small near the profile header
+      const candidates = container.querySelectorAll('span.text-body-small, .text-body-small span')
+      for (const el of candidates) {
+        const text = getTextContent(el)
+        if (!text) continue
+        // Location typically has a comma or is a plain city/country — filter out connection counts
+        if (/\d+\s*(connection|follower)/i.test(text)) continue
+        if (text.length > 2 && text.length < 80) return text
       }
+
+      container = container.parentElement
     }
 
     return null

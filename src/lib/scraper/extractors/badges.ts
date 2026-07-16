@@ -5,14 +5,12 @@ interface BadgesResult {
 
 function extractOpenToWork(): boolean {
   try {
-    // Open To Work badge appears as a frame/overlay on profile photo
-    const byAriaLabel =
-      document.querySelector('[aria-label*="open to work" i]') !== null ||
-      document.querySelector('[aria-label*="#OPENTOWORK" i]') !== null
+    if (
+      document.querySelector('[aria-label*="open to work" i]') ??
+      document.querySelector('[aria-label*="opentowork" i]')
+    )
+      return true
 
-    if (byAriaLabel) return true
-
-    // Fallback: look for badge text
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
     let node: Node | null = walker.nextNode()
     while (node) {
@@ -29,19 +27,22 @@ function extractOpenToWork(): boolean {
 
 function extractPremium(): boolean {
   try {
-    // Premium badge: LinkedIn Premium icon near the name
-    const byAriaLabel =
-      document.querySelector('[aria-label*="LinkedIn Premium" i]') !== null ||
-      document.querySelector('[aria-label*="Premium member" i]') !== null
+    // aria-label on the premium badge icon
+    if (
+      document.querySelector('[aria-label*="LinkedIn Premium" i]') ??
+      document.querySelector('[aria-label*="Premium member" i]')
+    )
+      return true
 
-    if (byAriaLabel) return true
-
-    // SVG title approach
-    const svgTitles = document.querySelectorAll('svg title')
-    for (const title of svgTitles) {
-      const text = title.textContent?.toLowerCase() ?? ''
-      if (text.includes('premium') || text.includes('career')) return true
+    // SVG title inside the premium gold icon
+    const svgTitles = document.querySelectorAll('svg title, svg desc')
+    for (const el of svgTitles) {
+      const text = el.textContent?.toLowerCase() ?? ''
+      if (text.includes('premium') || text.includes('career') || text.includes('gold')) return true
     }
+
+    // LinkedIn Premium icon has a specific li:premium class or similar
+    if (document.querySelector('[class*="premium" i]')) return true
 
     return false
   } catch {

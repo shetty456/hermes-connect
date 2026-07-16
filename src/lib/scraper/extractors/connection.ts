@@ -1,5 +1,3 @@
-import { findButtonByText } from '../utils'
-
 interface ConnectionResult {
   connectionDegree: string | null
   isConnected: boolean
@@ -10,21 +8,28 @@ interface ConnectionResult {
 
 function extractDegree(): string | null {
   try {
-    // Degree badge appears as "• 1st", "• 2nd", "• 3rd+" near the profile name
     const degreeRe = /\b(1st|2nd|3rd\+?)\b/i
-    const allSpans = document.querySelectorAll('span')
-    for (const span of allSpans) {
-      const text = span.textContent?.trim() ?? ''
-      const match = degreeRe.exec(text)
-      if (match && text.length < 20) return match[1] ?? null
+
+    // Check aria-labels first (most reliable)
+    const degreeEl =
+      document.querySelector('[aria-label*="1st degree" i]') ??
+      document.querySelector('[aria-label*="2nd degree" i]') ??
+      document.querySelector('[aria-label*="3rd degree" i]') ??
+      document.querySelector('[aria-label*="degree connection" i]')
+
+    if (degreeEl) {
+      const label = degreeEl.getAttribute('aria-label') ?? ''
+      const match = degreeRe.exec(label)
+      if (match?.[1]) return match[1]
     }
 
-    // Try aria-label approach
-    const degreeEl = document.querySelector('[aria-label*="degree connection" i]')
-    if (degreeEl) {
-      const labelText = degreeEl.getAttribute('aria-label') ?? ''
-      const match = degreeRe.exec(labelText)
-      if (match) return match[1] ?? null
+    // Scan short span text nodes (degree badge is always short)
+    const spans = document.querySelectorAll('span')
+    for (const span of spans) {
+      const text = span.textContent?.trim() ?? ''
+      if (text.length > 15) continue
+      const match = degreeRe.exec(text)
+      if (match?.[1]) return match[1]
     }
 
     return null
@@ -33,38 +38,39 @@ function extractDegree(): string | null {
   }
 }
 
-function hasButton(texts: string[]): boolean {
-  for (const text of texts) {
-    const btn = findButtonByText(document, text)
-    if (btn && !btn.disabled) return true
+function buttonExists(ariaFragments: string[], textFragments: string[]): boolean {
+  // Check by aria-label
+  for (const fragment of ariaFragments) {
+    if (document.querySelector(`button[aria-label*="${fragment}" i]`)) return true
+  }
+  // Check by visible button text
+  const buttons = document.querySelectorAll('button')
+  for (const btn of buttons) {
+    const text = btn.textContent?.trim().toLowerCase() ?? ''
+    for (const fragment of textFragments) {
+      if (text === fragment.toLowerCase() || text.startsWith(fragment.toLowerCase())) return true
+    }
   }
   return false
-}
-
-function hasAriaButton(labelFragment: string): boolean {
-  try {
-    const el = document.querySelector(`button[aria-label*="${labelFragment}" i]`)
-    return el !== null
-  } catch {
-    return false
-  }
 }
 
 export function extractConnectionInfo(_doc: Document): ConnectionResult {
   const connectionDegree = extractDegree()
   const isConnected = connectionDegree === '1st'
 
-  // Check for pending first (Withdraw/Pending button takes precedence)
-  const isPending =
-    hasButton(['Pending']) ||
-    hasAriaButton('Withdraw') ||
-    hasAriaButton('pending invitation')
+  const isPending = buttonExists(
+    ['Withdraw', 'pending invitation', 'Pending'],
+    ['Pending'],
+  )
 
   const canConnect =
     !isPending &&
-    (hasButton(['Connect']) || hasAriaButton('Connect with') || hasAriaButton('Invite'))
+    buttonExists(
+      ['Invite', 'Connect with', 'connect'],
+      ['Connect'],
+    )
 
-  const canMessage = hasButton(['Message']) || hasAriaButton('Message')
+  const canMessage = buttonExists(['Message'], ['Message'])
 
   return { connectionDegree, isConnected, canConnect, canMessage, isPending }
 }

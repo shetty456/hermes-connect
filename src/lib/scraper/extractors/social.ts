@@ -1,5 +1,3 @@
-import { findButtonByText } from '../utils'
-
 interface SocialResult {
   canFollow: boolean
   mutualConnections: number | null
@@ -9,12 +7,10 @@ interface SocialResult {
 function extractMutualConnections(): number | null {
   try {
     const mutualRe = /(\d+)\s+mutual\s+connection/i
-    // Search all text nodes
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
     let node: Node | null = walker.nextNode()
     while (node) {
-      const text = node.textContent?.trim() ?? ''
-      const match = mutualRe.exec(text)
+      const match = mutualRe.exec(node.textContent ?? '')
       if (match?.[1]) return parseInt(match[1], 10)
       node = walker.nextNode()
     }
@@ -29,25 +25,25 @@ function extractMutualGroups(): string[] {
     const groups: string[] = []
     const mutualGroupRe = /mutual group/i
 
-    // Search for sections or elements that mention mutual groups
-    const allEls = document.querySelectorAll('li, div, span')
-    for (const el of allEls) {
-      const parent = el.closest('section, aside, div[class]')
-      if (!parent) continue
-      const parentText = parent.textContent ?? ''
-      if (!mutualGroupRe.test(parentText)) continue
-
-      // Collect anchor or span text that looks like a group name
-      const links = parent.querySelectorAll('a, span[aria-hidden="true"]')
-      for (const link of links) {
-        const text = link.textContent?.trim()
-        if (text && text.length > 2 && !mutualGroupRe.test(text) && !groups.includes(text)) {
-          groups.push(text)
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+    let node: Node | null = walker.nextNode()
+    while (node) {
+      if (mutualGroupRe.test(node.textContent ?? '')) {
+        // Collect sibling/nearby anchor text as group names
+        const parent = node.parentElement?.closest('li, div, section')
+        if (parent) {
+          const links = parent.querySelectorAll('a')
+          for (const link of links) {
+            const text = link.textContent?.trim()
+            if (text && text.length > 2 && !mutualGroupRe.test(text) && !groups.includes(text)) {
+              groups.push(text)
+            }
+          }
         }
+        if (groups.length > 0) break
       }
-      if (groups.length > 0) break
+      node = walker.nextNode()
     }
-
     return groups
   } catch {
     return []
@@ -56,10 +52,13 @@ function extractMutualGroups(): string[] {
 
 function extractCanFollow(): boolean {
   try {
-    const byText = findButtonByText(document, 'Follow') !== null
-    if (byText) return true
-    const byAria = document.querySelector('button[aria-label*="Follow" i]') !== null
-    return byAria
+    if (document.querySelector('button[aria-label*="Follow" i]')) return true
+    const buttons = document.querySelectorAll('button')
+    for (const btn of buttons) {
+      const text = btn.textContent?.trim().toLowerCase()
+      if (text === 'follow') return true
+    }
+    return false
   } catch {
     return false
   }
